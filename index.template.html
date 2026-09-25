@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>stego-studio — offline</title>
+<style>
+  :root { color-scheme: dark; }
+  body {
+    font-family: ui-monospace, monospace;
+    background: #101418; color: #d7dde3;
+    display: flex; gap: 24px; padding: 20px; margin: 0; align-items: flex-start;
+  }
+  h1 { font-size: 18px; margin: 0 0 10px; }
+  h2 { font-size: 15px; margin: 0 0 8px; color: #4d9de0; }
+  .panel { display: flex; flex-direction: column; gap: 10px; width: 340px; }
+  .panel.wide { flex: 1; }
+  canvas { max-width: 100%; border: 1px solid #2c343c; }
+  textarea, input {
+    font: inherit; background: #1b2129; color: #d7dde3;
+    border: 1px solid #2c343c; padding: 6px; width: 100%;
+  }
+  textarea { height: 70px; }
+  button {
+    font: inherit; background: #1b2129; color: #d7dde3;
+    border: 1px solid #2c343c; padding: 6px 12px; cursor: pointer;
+  }
+  #gauge { height: 12px; background: #1b2129; border: 1px solid #2c343c; }
+  #gauge-fill { height: 100%; width: 0; background: #2e7d32; }
+  #gauge-text { font-size: 12px; color: #9aa5af; }
+  #extract-output { word-break: break-all; background: #1b2129; padding: 8px; min-height: 40px; }
+  #heatmap { display: flex; flex-direction: column; gap: 1px; }
+  #heatmap div { width: 100%; }
+  #analysis { font-size: 12px; color: #9aa5af; }
+  #embed-status { color: #7fdc9c; min-height: 16px; }
+  small { color: #7a848e; }
+</style>
+</head>
+<body>
+  <div class="panel wide">
+    <h1>stego-studio <small>(educational LSB steganography)</small></h1>
+    <canvas id="canvas" width="320" height="200"></canvas>
+    <input type="file" id="file" accept="image/png">
+    <small>load a PNG, type a message, embed — the LSB plane of every pixel
+    carries your text. Educational only: LSB stego is detectable and fragile.</small>
+  </div>
+  <div class="panel">
+    <h2>capacity</h2>
+    <div id="gauge"><div id="gauge-fill"></div></div>
+    <div id="gauge-text">load a PNG first</div>
+    <h2>embed</h2>
+    <textarea id="message" placeholder="secret message…"></textarea>
+    <input id="key" placeholder="XOR key (optional, used for extract too)">
+    <button id="embed">embed + download PNG</button>
+    <div id="embed-status"></div>
+    <h2>extract</h2>
+    <button id="extract">extract</button>
+    <div id="extract-output"></div>
+    <h2>analysis</h2>
+    <div id="heatmap"></div>
+    <div id="analysis"></div>
+  </div>
+<script type="module">
+/*__APP__*/
+</script>
+</body>
+</html>

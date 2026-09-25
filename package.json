@@ -1,0 +1,12 @@
+{
+  "name": "stego-studio",
+  "version": "1.0.0",
+  "description": "Educational LSB steganography: hide text in PNG pixels with capacity gauge, XOR obfuscation and analysis view — single-file offline HTML",
+  "license": "MIT",
+  "type": "module",
+  "engines": { "node": ">=22.18.0" },
+  "scripts": {
+    "test": "node --test tests/",
+    "build": "node build.ts"
+  }
+}

@@ -1,0 +1,335 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>stego-studio — offline</title>
+<style>
+  :root { color-scheme: dark; }
+  body {
+    font-family: ui-monospace, monospace;
+    background: #101418; color: #d7dde3;
+    display: flex; gap: 24px; padding: 20px; margin: 0; align-items: flex-start;
+  }
+  h1 { font-size: 18px; margin: 0 0 10px; }
+  h2 { font-size: 15px; margin: 0 0 8px; color: #4d9de0; }
+  .panel { display: flex; flex-direction: column; gap: 10px; width: 340px; }
+  .panel.wide { flex: 1; }
+  canvas { max-width: 100%; border: 1px solid #2c343c; }
+  textarea, input {
+    font: inherit; background: #1b2129; color: #d7dde3;
+    border: 1px solid #2c343c; padding: 6px; width: 100%;
+  }
+  textarea { height: 70px; }
+  button {
+    font: inherit; background: #1b2129; color: #d7dde3;
+    border: 1px solid #2c343c; padding: 6px 12px; cursor: pointer;
+  }
+  #gauge { height: 12px; background: #1b2129; border: 1px solid #2c343c; }
+  #gauge-fill { height: 100%; width: 0; background: #2e7d32; }
+  #gauge-text { font-size: 12px; color: #9aa5af; }
+  #extract-output { word-break: break-all; background: #1b2129; padding: 8px; min-height: 40px; }
+  #heatmap { display: flex; flex-direction: column; gap: 1px; }
+  #heatmap div { width: 100%; }
+  #analysis { font-size: 12px; color: #9aa5af; }
+  #embed-status { color: #7fdc9c; min-height: 16px; }
+  small { color: #7a848e; }
+</style>
+</head>
+<body>
+  <div class="panel wide">
+    <h1>stego-studio <small>(educational LSB steganography)</small></h1>
+    <canvas id="canvas" width="320" height="200"></canvas>
+    <input type="file" id="file" accept="image/png">
+    <small>load a PNG, type a message, embed — the LSB plane of every pixel
+    carries your text. Educational only: LSB stego is detectable and fragile.</small>
+  </div>
+  <div class="panel">
+    <h2>capacity</h2>
+    <div id="gauge"><div id="gauge-fill"></div></div>
+    <div id="gauge-text">load a PNG first</div>
+    <h2>embed</h2>
+    <textarea id="message" placeholder="secret message…"></textarea>
+    <input id="key" placeholder="XOR key (optional, used for extract too)">
+    <button id="embed">embed + download PNG</button>
+    <div id="embed-status"></div>
+    <h2>extract</h2>
+    <button id="extract">extract</button>
+    <div id="extract-output"></div>
+    <h2>analysis</h2>
+    <div id="heatmap"></div>
+    <div id="analysis"></div>
+  </div>
+<script type="module">
+// core.ts (inlined)
+/* LSB steganography core: capacity, embed, extract, XOR obfuscation and
+ * analysis. Operates on raw RGBA pixel arrays (Uint8ClampedArray-compatible
+ * shape: Uint8Array of length width*height*4). Pure logic — no canvas. */
+
+const MAGIC = "STG1"; // 4-byte marker: LSB-encoded payload follows
+const HEADER_BYTES = 4 + 4; // magic + 4-byte big-endian payload length
+
+                           
+                                                                     
+                                                                     
+ 
+
+export function capacity(width        , height        )           {
+  const totalBits = width * height * 3; // alpha channel untouched
+  return {
+    totalBits,
+    maxMessageBytes: Math.floor((totalBits - HEADER_BYTES * 8) / 8),
+  };
+}
+
+/** XOR-obfuscate bytes with a repeating key. Empty key = identity. */
+export function xorBytes(data            , key        )             {
+  if (key === "") return data;
+  const keyBytes = new TextEncoder().encode(key);
+  const out = new Uint8Array(data.length);
+  for (let i = 0; i < data.length; i++) {
+    out[i] = data[i] ^ keyBytes[i % keyBytes.length] ;
+  }
+  return out;
+}
+
+/** Embed a UTF-8 message into pixel data. Mutates `pixels` in place.
+ * Each byte becomes 8 LSBs across the RGB channels (alpha skipped).
+ * Throws when the message doesn't fit. */
+export function embed(
+  pixels            ,
+  message        ,
+  key         = "",
+)       {
+  const payload = xorBytes(new TextEncoder().encode(message), key);
+  const cap = capacity(pixels.length / 4, 1); // width-only: height=1
+  if (payload.length > cap.maxMessageBytes) {
+    throw new Error(
+      `message too long: ${payload.length} bytes, capacity ${cap.maxMessageBytes}`,
+    );
+  }
+  const frame = new Uint8Array(HEADER_BYTES + payload.length);
+  frame.set(new TextEncoder().encode(MAGIC), 0);
+  const length = payload.length;
+  frame[4] = (length >>> 24) & 0xff;
+  frame[5] = (length >>> 16) & 0xff;
+  frame[6] = (length >>> 8) & 0xff;
+  frame[7] = length & 0xff;
+  frame.set(payload, HEADER_BYTES);
+
+  let bitIndex = 0;
+  for (let px = 0; px < pixels.length && bitIndex < frame.length * 8; px += 4) {
+    for (let channel = 0; channel < 3; channel++) {
+      if (bitIndex >= frame.length * 8) break;
+      const byte = frame[bitIndex >> 3]          ;
+      const bit = (byte >> (7 - (bitIndex % 8))) & 1;
+      pixels[px + channel] = (pixels[px + channel]  & 0xfe) | bit;
+      bitIndex++;
+    }
+  }
+}
+
+                                
+                  
+                
+ 
+
+/** Extract a message previously embedded by `embed`. Reads the pixel
+ * stream ONCE sequentially (header then payload — the same order embed
+ * wrote). Returns null when the magic marker is missing. */
+export function extract(pixels            , key         = "")                       {
+  const readBit = (bitIndex        )         => {
+    // each pixel contributes 3 bits (RGB); alpha skipped
+    const px = Math.floor(bitIndex / 3) * 4;
+    const channel = bitIndex % 3;
+    return pixels[px + channel]  & 1;
+  };
+  const readByte = (byteIndex        )         => {
+    let byte = 0;
+    for (let bit = 0; bit < 8; bit++) {
+      byte = (byte << 1) | readBit(byteIndex * 8 + bit);
+    }
+    return byte;
+  };
+
+  // header: magic + length
+  let magic = "";
+  for (let b = 0; b < 4; b++) magic += String.fromCharCode(readByte(b));
+  if (magic !== MAGIC) return null;
+  const length =
+    (readByte(4) << 24) | (readByte(5) << 16) | (readByte(6) << 8) | readByte(7);
+  if (length <= 0 || length > pixels.length / 4) return null;
+
+  const payload = new Uint8Array(length);
+  for (let b = 0; b < length; b++) {
+    payload[b] = readByte(8 + b);
+  }
+  const decoded = xorBytes(payload, key);
+  return { message: new TextDecoder().decode(decoded), bytes: length };
+}
+
+                           
+                                                                           
+                  
+                   
+                                                                    
+                              
+ 
+
+/** Analysis view: how "normal" the LSB plane looks. Natural images sit
+ * near 50% ones; a fully-stuffed image is also ~50%, but a freshly
+ * zeroed or tiny payload region skews locally. */
+export function analyze(pixels            )           {
+  let lsbOnes = 0;
+  let lsbTotal = 0;
+  for (let px = 0; px < pixels.length; px += 4) {
+    for (let channel = 0; channel < 3; channel++) {
+      lsbTotal++;
+      lsbOnes += pixels[px + channel]  & 1;
+    }
+  }
+  const expected = lsbTotal / 2;
+  const deviation = lsbTotal === 0 ? 0 : (Math.abs(lsbOnes - expected) / lsbTotal) * 100;
+  return { lsbOnes, lsbTotal, uniformityDeviation: deviation };
+}
+
+/** Per-row LSB-ones ratio for the analysis heatmap. */
+export function lsbRowRatios(pixels            , width        , height        )           {
+  const ratios           = [];
+  for (let row = 0; row < height; row++) {
+    let ones = 0;
+    let total = 0;
+    for (let col = 0; col < width; col++) {
+      const base = (row * width + col) * 4;
+      for (let channel = 0; channel < 3; channel++) {
+        total++;
+        ones += pixels[base + channel]  & 1;
+      }
+    }
+    ratios.push(total === 0 ? 0 : ones / total);
+  }
+  return ratios;
+}
+
+/* DOM layer: image load (file picker), capacity gauge, embed/extract
+ * forms with key field, analysis heatmap. Canvas reads/writes pixels. */
+
+
+const $ = (id        )              => document.getElementById(id)               ;
+
+let pixels                    = null;
+let width = 0;
+let height = 0;
+
+function readImage(file      )                {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      const canvas = $("canvas")                     ;
+      canvas.width = img.naturalWidth;
+      canvas.height = img.naturalHeight;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return reject(new Error("no 2d context"));
+      ctx.drawImage(img, 0, 0);
+      const data = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      pixels = new Uint8Array(data.data);
+      width = canvas.width;
+      height = canvas.height;
+      URL.revokeObjectURL(url);
+      resolve();
+    };
+    img.onerror = () => reject(new Error("not an image"));
+    img.src = url;
+  });
+}
+
+function updateCapacity()       {
+  if (!pixels) return;
+  const cap           = capacity(width, height);
+  const messageLength = new TextEncoder().encode(
+    ($("message")                       ).value,
+  ).length;
+  const used = 8 + messageLength; // header + payload
+  const percent = Math.min(100, Math.round((used / cap.maxMessageBytes) * 100));
+  const gauge = $("gauge-fill")               ;
+  gauge.style.width = `${Math.min(percent, 100)}%`;
+  gauge.style.background = percent > 90 ? "#c62828" : percent > 60 ? "#b98900" : "#2e7d32";
+  $("gauge-text").textContent =
+    `${used} / ${cap.maxMessageBytes} bytes (${percent}%) — image ${width}×${height}`;
+}
+
+function downloadPng()       {
+  if (!pixels) return;
+  const canvas = $("canvas")                     ;
+  canvas.toBlob((blob) => {
+    if (!blob) return;
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = "stego.png";
+    link.click();
+  }, "image/png");
+}
+
+async function doEmbed()                {
+  if (!pixels) return;
+  const message = ($("message")                       ).value;
+  const key = ($("key")                    ).value;
+  try {
+    embed(pixels, message, key);
+    downloadPng();
+    $("embed-status").textContent = "embedded — stego.png downloading";
+  } catch (error) {
+    $("embed-status").textContent = String(error);
+  }
+  paintAnalysis();
+}
+
+function doExtract()       {
+  if (!pixels) return;
+  const key = ($("key")                    ).value;
+  const result = extract(pixels, key);
+  const output = $("extract-output")               ;
+  if (result === null) {
+    output.textContent = "no payload found (magic marker missing)";
+  } else {
+    output.textContent = result.message;
+  }
+}
+
+function paintAnalysis()       {
+  if (!pixels) return;
+  const stats = analyze(pixels);
+  const ratios = lsbRowRatios(pixels, width, height);
+  const heat = $("heatmap")               ;
+  heat.innerHTML = "";
+  for (const ratio of ratios) {
+    const rowEl = document.createElement("div");
+    rowEl.style.height = "4px";
+    const blue = Math.round(ratio * 100);
+    rowEl.style.background = `rgb(${255 - blue}, ${255 - blue}, 255)`;
+    heat.appendChild(rowEl);
+  }
+  $("analysis").textContent =
+    `LSB ones: ${stats.lsbOnes}/${stats.lsbTotal} (${(100 - stats.uniformityDeviation).toFixed(1)}% ones) · ` +
+    `deviation from 50/50: ${stats.uniformityDeviation.toFixed(2)}%`;
+}
+
+function setup()       {
+  $("file").addEventListener("change", async () => {
+    const file = ($("file")                    ).files?.[0];
+    if (!file) return;
+    await readImage(file);
+    updateCapacity();
+    paintAnalysis();
+  });
+  $("message")?.addEventListener("input", updateCapacity);
+  $("embed")?.addEventListener("click", doEmbed);
+  $("extract")?.addEventListener("click", doExtract);
+}
+
+setup();
+
+</script>
+</body>
+</html>
